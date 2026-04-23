@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oscillo_plasma_calc"
+version = "0.1.0"
+description = "Nomura lab underwater plasma oscilloscope waveform analyzer with traceable equation steps"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "sympy>=1.13",
+    "plotly>=5.20",
+    "matplotlib>=3.9",
+    "jinja2>=3.1",
+    "shiny>=1.0",
+    "shinywidgets>=0.3",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

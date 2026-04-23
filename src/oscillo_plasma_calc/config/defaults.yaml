@@ -1,0 +1,8 @@
+electrode_gap_mm: 1.0
+liquid: water
+gas: CO2
+pressure_atm: 1.0
+paschen:
+  A: 112.5     # (Pa·m)^-1 — air, reference value
+  B: 2737.5    # V/(Pa·m)
+  gamma: 0.01
