@@ -15,5 +15,12 @@ docs/2026-05-02_phase5_nasa_integration_plan.md):
 from .species import Species
 from .nasa_poly import NASA7, NASA9
 from .equilibrium_constants import log10_K_from_dG
+from .database import (
+    SpeciesEntry, lookup, list_species, available_datasets, species_count,
+)
 
-__all__ = ["Species", "NASA7", "NASA9", "log10_K_from_dG"]
+__all__ = [
+    "Species", "NASA7", "NASA9", "log10_K_from_dG",
+    "SpeciesEntry", "lookup", "list_species",
+    "available_datasets", "species_count",
+]
