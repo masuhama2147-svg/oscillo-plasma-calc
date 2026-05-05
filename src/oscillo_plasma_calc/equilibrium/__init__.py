@@ -12,5 +12,15 @@ Not yet implemented (deferred per docs/2026-05-02_phase5_nasa_integration_plan.m
 - Transport properties (γ, c_p, μ)
 """
 from .tp_equilibrium import equilibrium_tp, EquilibriumResult
+from .hp_equilibrium import equilibrium_hp, HPResult
+from .uv_equilibrium import equilibrium_uv, UVResult
+from .condensed_phase import (
+    evaluate_condensed_insertion, CondensedTestResult, DEFAULT_CANDIDATES,
+)
 
-__all__ = ["equilibrium_tp", "EquilibriumResult"]
+__all__ = [
+    "equilibrium_tp", "EquilibriumResult",
+    "equilibrium_hp", "HPResult",
+    "equilibrium_uv", "UVResult",
+    "evaluate_condensed_insertion", "CondensedTestResult", "DEFAULT_CANDIDATES",
+]

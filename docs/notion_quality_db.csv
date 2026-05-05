@@ -1,0 +1,55 @@
+Title,Category,Priority,Status,Effort_days,Module,Description,Acceptance,References
+"CEA element-potential method for 5-10x faster TP equilibrium",数値精度,P1,Backlog,10,equilibrium,"Current SLSQP takes 1-3s for 100 species. Implement CEA RP-1311 Newton-Raphson element potential method to reach <0.2s.","Equilibrium runs in <0.5s for 100 species; matches CEA reference output to 1%.","NASA RP-1311 Section 6.4"
+"Wilhoit b-parameter species DB",数値精度,P2,Backlog,3,thermo,"Currently user-specified. Auto-derive from atom count + vibration modes for common species.","WilhoitCp.fit_default(species_name) returns reasonable b for 50+ species.","NASA RP-1271"
+"Stark coefficient alpha(Te) lookup table",数値精度,P2,Backlog,2,plasma,"Replace constant alpha=1e23 with Te-dependent table for ne accuracy 30%->5%.","ne measurement error reduced to <5% on benchmark cases.","Gigosos & Cardenoso 1996 JPB 29:4795"
+"Lissajous displacement-current correction",数値精度,P2,Backlog,3,electrical,"Add monitor Cm input field; subtract stray capacitance contribution.","P_bar agreement between E/T and Lissajous within 5%.","Peeters & van der Laan 2015 PSST 24:015014"
+"rise_time first_pulse mode tuning",数値精度,P2,Backlog,2,signal,"Optimize prominence and peak window per species/condition.","rise_time variance < 10% across PW0.5-2.0 conditions.",
+"NASA9 boundary 2nd derivative continuity check",数値精度,P3,Backlog,2,thermo,"Detect Cp 2nd derivative discontinuity at temperature-range boundaries.","Test that flags 50% of NASA9 species with discontinuities >0.1.",
+"Multi-root HP/UV equilibrium solver",数値精度,P2,Backlog,5,equilibrium,"Brent assumes unimodal; use multi-start to find all roots.","Returns multiple solutions when present.",
+"6-term EEDF expansion for high E/N",数値精度,P3,Backlog,8,plasma.eedf,"Two-term breaks at >1000 Td. Implement 6-term spherical harmonic expansion.","Accuracy <10% vs BOLSIG+ at 2000 Td.",
+"Arrhenius/Lindemann reaction rate evaluator",数値精度,P2,Backlog,4,chemistry,"k(T) = A T^n exp(-Ea/RT) with optional Lindemann form for pressure-dependent reactions.","Reproduces GRI-Mech rate constants within 1%.",
+"TP equilibrium condensed-phase hysteresis",数値精度,P2,Backlog,2,equilibrium,"Once-in-stays-in threshold to prevent oscillation.","No species toggling within iteration tolerance.",
+"Shiny modularize 12 tabs to hierarchical sidenav",UI,P1,Backlog,5,ui,"12 tabs overflow horizontally. Group into Tier 1/2/3/Twin via left sidebar nav.","All tabs reachable in <=2 clicks.",
+"Cantera ReactionPathDiagram graphviz rendering",UI,P1,Backlog,5,ui,"Generate dot file via Cantera, render with subprocess graphviz.","C/H/O flux diagrams display in Reaction Path tab.",
+"Equilibrium async with extended_task",UI,P1,Backlog,2,ui,"1-3s blocking calculations make UI feel frozen.","UI responsive during equilibrium runs.",
+"Reaction Path YAML and visualization sub-tabs",UI,P2,Backlog,1,ui,"Separate text YAML from visual diagram.","Two sub-tabs side-by-side.",
+"Consistent paper/screen plot mode across all plots",UI,P2,Backlog,2,ui,"Currently inconsistent. Apply single switch globally.","All plots respect plot_mode setting.",
+"Tutorial mode for B4 first-time users",UI,P2,Backlog,5,ui,"Modal walkthrough on first launch.","B4 student can analyze a sample dataset in <30min.",
+"Multi-condition comparison tab (Pareto front)",UI,P1,Backlog,5,ui,"Load multiple CSVs, plot SEI vs chi_CO2 scatter.","Direct paper Fig.3 ready output.",
+"KaTeX physics macro support",UI,P3,Backlog,1,ui,"Add \\dv, \\norm, etc.","Custom macros render correctly.",
+"Dark mode for UI and plots",UI,P3,Backlog,2,ui,"Reduces eye strain at night.","Toggle persists across sessions.",
+"Tablet/iPad layout (M2/M4 Pad)",UI,P3,Backlog,4,ui,"Field reference use case.","All tabs usable on iPad Pro 11/13 inch.",
+"Reproduce-CLI clipboard button on Trace cards",UI,P2,Backlog,1,ui,"Use existing provenance to emit copyable command.","Click copies python -m oscillo_plasma_calc.cli ... command.",
+"PNG export for paper figures",UI,P2,Backlog,2,ui,"Standard plot -> publication-ready PNG.","SVG and 300dpi PNG both available.",
+"LXCat default cross-section bundle (CO2/H2/H2O/CH4)",データ,P1,Backlog,1,plasma.eedf,"Pre-bundle in data/cross_sections.","EEDF runs out-of-the-box for plasma chemistry.","https://lxcat.net"
+"Catalyst activation energy literature DB",データ,P1,Backlog,5,chemistry,"Excel/CSV of (catalyst, reaction, Ea, A, T_range).","100+ rows of validated entries.","Lab meeting 2026-04-23"
+"NIST Atomic Spectra DB integration",データ,P2,Backlog,3,spectroscopy,"Auto-fetch line data instead of manual xlsx.","add_element('Fe') auto-loads lines.","https://physics.nist.gov/asd"
+"Burcat thermo database integration",データ,P2,Backlog,1,thermo,"Fetch and parse Burcat .thr format.","1500+ species available.","http://garfield.chem.elte.hu/Burcat/"
+"Condensed-phase species name alias layer",データ,P2,Backlog,2,thermo,"C(s) vs C(gr) name disambiguation.","lookup() resolves all common aliases.",
+"Lab experimental data archive (100+ examples)",データ,P1,Backlog,10,docs,"Oscillo + OES + GC triples for benchmark.","100+ validated examples in lab NAS.",
+"Kurita power supply specs integration",データ,P2,Backlog,1,qa,"Spec sheet drives 1 kW budget thresholds.","Budget rule references actual hardware limits.",
+"GC-MS text output loader (Shimadzu/Agilent)",データ,P2,Backlog,5,chemistry,"Auto-parse vendor formats.","Hayashi-kun's ethanol experiment data ingests directly.",
+"Activate GitHub Actions CI",インフラ,P1,Backlog,0.1,infra,"Run gh auth refresh -s workflow then push.","CI yml visible on GitHub.",
+"OS x Python matrix CI (Ubuntu/Mac/Win x 3.12/3.13)",インフラ,P1,Backlog,1,infra,"Six-cell matrix per push.","All cells green on main.",
+"DuckDB/SQLite long-term experiment storage",インフラ,P2,Backlog,5,infra,"Per Lab meeting 2026-04-23 Koyama task.","Single DB file holds 1000+ runs.",
+"Quarto docs site + Cloudflare Pages",インフラ,P2,Backlog,3,docs,"Private docs URL with email allowlist.","docs.nomura-lab.example.jp accessible.",
+"Posit Connect Cloud Shiny deployment",インフラ,P2,Backlog,2,infra,"Public URL for collaborators.","Shiny accessible at posit.cloud URL.",
+"Docker compose CPU/GPU profiles",インフラ,P3,Backlog,5,infra,"Reproducible runtime.","docker compose up serves the app.",
+"uv lock for dependency pinning",インフラ,P2,Backlog,1,infra,"Windows beginner reproducibility.","uv sync installs identical environments.",
+"Release workflow (GitHub Release + Zenodo DOI)",インフラ,P3,Backlog,3,infra,"Citable software releases.","Each main commit on tag gets DOI.",
+"Video tutorials per tab",文書,P2,Backlog,5,docs,"3-5 min videos per tab.","9 videos covering main workflow.",
+"Auto-generate paper Methods section",文書,P1,Backlog,3,docs,"Generate Methods text from session state.","Output is paste-ready for journal.",
+"API reference (mkdocstrings)",文書,P2,Backlog,1,docs,"Auto from docstrings.","Read the Docs-style site.",
+"docs/theory excerpts of NASA RP-1271/1311",文書,P2,Backlog,2,docs,"Cite original derivations.","Inline math matches PAC91/CEA.",
+"Jupyter tutorial notebooks",文書,P2,Backlog,3,docs,"Hands-on learning.","5+ notebooks covering Tier 1-3.",
+"Auto-export BibTeX",文書,P3,Backlog,1,docs,"For paper writing.","One-click .bib download.",
+"Onboarding PDF for collaborators",文書,P3,Backlog,2,docs,"Self-service onboarding.","Single PDF covers install + first run.",
+"Architectural Decision Records (ADRs)",文書,P3,Backlog,2,docs,"Future maintainability.","Each major decision has an ADR.",
+"CEA official example 40+ test fixtures",検証,P1,Backlog,5,tests,"Continuous numerical verification.","All examples reproduce CEA output to 1%.","NASA RP-1311"
+"BOLSIG+ vs Python two-term solver comparison",検証,P1,Backlog,3,tests,"Quantify accuracy gap.","Mean error <20% reported in docs.","Hagelaar 2005 PSST 14:722"
+"Cantera vs CEA-like dual verification UI",検証,P2,Backlog,2,ui,"Show both solutions side by side.","Difference flagged when >5%.",
+"Performance scaling test (100/500/1000 species)",検証,P2,Backlog,2,tests,"Track scaling behavior.","Benchmark plot in CI artifact.",
+"Property-based testing (Hypothesis) for SLSQP",検証,P3,Backlog,3,tests,"Edge case discovery.","100+ generated cases pass.",
+"NASA polynomial vs JANAF exhaustive verification",検証,P2,Backlog,3,tests,"50 species Cp at 5 temperatures matches JANAF.","All within 1%.",
+"UI snapshot tests (Playwright)",検証,P3,Backlog,5,tests,"Prevent UI regression.","Each tab snapshot in CI.",
+"Embed numerical-verification script in CI",検証,P1,Backlog,1,infra,"Self-consistency check on every push.","CI runs the critique-report code.",

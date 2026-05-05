@@ -48,6 +48,12 @@ from oscillo_plasma_calc.report.markdown import build_markdown
 from oscillo_plasma_calc.docs import get_explanation
 from oscillo_plasma_calc.qa import validate_csv, evaluate_gates
 from oscillo_plasma_calc.ui.components.gate_panel import render_gate_panel
+from oscillo_plasma_calc.thermo import (
+    lookup as thermo_lookup, export_cantera_yaml, cp_R_extrapolated,
+)
+from oscillo_plasma_calc.equilibrium import (
+    equilibrium_tp, evaluate_condensed_insertion,
+)
 from oscillo_plasma_calc.ui.components import (
     anomaly_markdown,
     apply_research_plot_layout,
@@ -807,6 +813,91 @@ app_ui = ui.page_navbar(
         ),
     ),
     ui.nav_panel(
+        "🌡 Thermo DB",
+        ui.tags.details(
+            ui.tags.summary("▼ このタブの読み方",
+                            style="cursor:pointer; font-weight:600;"),
+            ui.tags.ul(
+                ui.tags.li("species 名を入力 → NASA polynomial 由来の Cp(T), H(T), S(T), G(T) を表示"),
+                ui.tags.li("典型物質: CO2, H2, H2O, CO, CH3OH, CH4, OH, O, H, NO ほか 1100+"),
+                ui.tags.li("Tmin / Tmax の範囲外は赤帯で警告。Wilhoit 高温外挿に切替可"),
+                ui.tags.li("出典: NASA Glenn 2002 (NASA9), GRI-Mech 3.0 (NASA7), CEA"),
+            ),
+            style=("background:#eef5fa; border-radius:6px; padding:12px; margin:8px 0;"),
+        ),
+        ui.layout_sidebar(
+            ui.sidebar(
+                ui.h4("species を選ぶ"),
+                ui.input_text("thermo_species", "species 名", value="CO2"),
+                ui.input_numeric("thermo_T", "T [K]", 1000, min=10),
+                ui.input_action_button("thermo_btn", "計算", class_="btn-primary"),
+                width=320,
+            ),
+            ui.output_ui("thermo_output"),
+        ),
+    ),
+    ui.nav_panel(
+        "⚖️ Equilibrium",
+        ui.tags.details(
+            ui.tags.summary("▼ このタブの読み方",
+                            style="cursor:pointer; font-weight:600;"),
+            ui.tags.ul(
+                ui.tags.li("CEA 風 TP / HP / UV 平衡計算"),
+                ui.tags.li("元素入力: C, H, O, N の各モル数 → 平衡組成（mole fraction）"),
+                ui.tags.li("凝縮相判定: 黒鉛 (C(gr)) や金属酸化物 (CuO, WO3 等) の析出可否を自動表示"),
+                ui.tags.li("⚠ 算出された Te が Te-provisional の場合は使わない"),
+            ),
+            style=("background:#eef5fa; border-radius:6px; padding:12px; margin:8px 0;"),
+        ),
+        ui.layout_sidebar(
+            ui.sidebar(
+                ui.h4("平衡計算 (TP)"),
+                ui.input_text("eq_species",
+                              "species (カンマ区切り)",
+                              value="CO2,H2,CO,H2O,CH3OH,OH,H,O"),
+                ui.input_numeric("eq_T", "T [K]", 2000.0, min=100),
+                ui.input_numeric("eq_P_atm", "P [atm]", 1.0, min=0.001),
+                ui.input_numeric("eq_C", "C モル数", 1.0, min=0),
+                ui.input_numeric("eq_H", "H モル数", 2.0, min=0),
+                ui.input_numeric("eq_O", "O モル数", 2.0, min=0),
+                ui.input_checkbox("eq_condensed",
+                                  "凝縮相 (graphite/oxides) を試す", value=True),
+                ui.input_action_button("eq_btn", "計算", class_="btn-primary"),
+                width=320,
+            ),
+            ui.output_ui("eq_output"),
+        ),
+    ),
+    ui.nav_panel(
+        "🛤 Reaction Path",
+        ui.tags.details(
+            ui.tags.summary("▼ このタブの読み方",
+                            style="cursor:pointer; font-weight:600;"),
+            ui.tags.ul(
+                ui.tags.li("Equilibrium タブで計算した species を Cantera YAML に export"),
+                ui.tags.li("Cantera がインストールされていれば ReactionPathDiagram を生成"),
+                ui.tags.li("元素 (C / H / O) ごとのフラックス図を可視化"),
+                ui.tags.li("Cantera 未導入時は YAML テキストのみ出力"),
+            ),
+            style=("background:#eef5fa; border-radius:6px; padding:12px; margin:8px 0;"),
+        ),
+        ui.layout_sidebar(
+            ui.sidebar(
+                ui.h4("Cantera YAML エクスポート"),
+                ui.input_text("rp_species",
+                              "species (カンマ区切り)",
+                              value="CO2,H2,CO,H2O,CH3OH,OH"),
+                ui.input_action_button("rp_btn", "YAML 生成", class_="btn-primary"),
+                ui.tags.hr(),
+                ui.tags.small(
+                    "M4 Mac でも import cantera は可能 (pip install cantera)。",
+                    style="color:#666;"),
+                width=320,
+            ),
+            ui.output_ui("rp_output"),
+        ),
+    ),
+    ui.nav_panel(
         "Trace",
         ui.tags.details(
             ui.tags.summary("▼ このタブの読み方", style="cursor:pointer; font-weight:600;"),
@@ -1467,6 +1558,200 @@ def server(input, output, session):
                 ui.p(f"R²: {bp.r_squared:.4f} / LTE 判定: {bp.lte_quality_label}"),
             ))
         return ui.div(*parts)
+
+    # ---- Phase 5+ : Thermo DB tab ----
+    @output
+    @render.ui
+    def thermo_output():
+        if input.thermo_btn() == 0:
+            return ui.p("species 名と温度を入れて「計算」を押してください。")
+        name = (input.thermo_species() or "").strip()
+        T = float(input.thermo_T() or 1000.0)
+        e = thermo_lookup(name)
+        if e is None:
+            return ui.div(
+                ui.tags.strong(f"⚠ '{name}' は DB に見つかりません"),
+                ui.p("試した DB: gri30, nasa_gas (NASA Glenn 2002), "
+                     "airNASA9, nasa_condensed", style="color:#666;"),
+                style=("background:#fdeaea; border-left:3px solid #c33; "
+                       "padding:10px 14px; border-radius:4px;"),
+            )
+        R = 8.314462618
+        in_range = e.species.is_in_temperature_range(T)
+        try:
+            cp = e.evaluator.cp_R(T) * R
+            h_RT = e.evaluator.h_RT(T)
+            s_R = e.evaluator.s_R(T)
+            g_RT = e.evaluator.g_RT(T)
+        except ValueError:
+            cp = h_RT = s_R = g_RT = float("nan")
+
+        warn = ""
+        if not in_range:
+            warn = ui.div(
+                f"⚠ T={T} K is outside [{e.species.Tmin}, {e.species.Tmax}] K. "
+                f"値は Wilhoit 外挿の対象。",
+                style=("background:#fff7e6; border-left:3px solid #c98a00; "
+                       "padding:8px 12px; border-radius:4px; margin:8px 0;"),
+            )
+        return ui.div(
+            ui.h4(f"{name}  ({e.species.formula}, M={e.species.molar_mass_g_per_mol:.2f} g/mol)"),
+            warn,
+            ui.tags.table(
+                {"class": "table table-striped", "style": "max-width:520px"},
+                ui.tags.tr(ui.tags.th("量"), ui.tags.th("値"), ui.tags.th("単位")),
+                ui.tags.tr(ui.tags.td("Cp"), ui.tags.td(f"{cp:.4f}"),
+                            ui.tags.td("J/mol/K")),
+                ui.tags.tr(ui.tags.td("H/RT"), ui.tags.td(f"{h_RT:.4f}"),
+                            ui.tags.td("dimensionless")),
+                ui.tags.tr(ui.tags.td("S/R"), ui.tags.td(f"{s_R:.4f}"),
+                            ui.tags.td("dimensionless")),
+                ui.tags.tr(ui.tags.td("G/RT"), ui.tags.td(f"{g_RT:.4f}"),
+                            ui.tags.td("dimensionless")),
+                ui.tags.tr(ui.tags.td("ΔH (T)"),
+                            ui.tags.td(f"{h_RT * R * T / 1000:.3f}"),
+                            ui.tags.td("kJ/mol")),
+                ui.tags.tr(ui.tags.td("S (T)"),
+                            ui.tags.td(f"{s_R * R:.4f}"),
+                            ui.tags.td("J/mol/K")),
+            ),
+            ui.p(f"出典: {e.species.source}", style="color:#666; font-size:0.9em;"),
+            ui.p(f"温度範囲: [{e.species.Tmin}, {e.species.Tmax}] K",
+                 style="color:#666; font-size:0.9em;"),
+        )
+
+    # ---- Phase 5+ : Equilibrium tab ----
+    eq_state = reactive.value(None)
+
+    @reactive.effect
+    @reactive.event(input.eq_btn)
+    def _eq_compute():
+        names = [s.strip() for s in (input.eq_species() or "").split(",") if s.strip()]
+        T = float(input.eq_T() or 2000.0)
+        P = float(input.eq_P_atm() or 1.0) * 101325.0
+        reactants = {}
+        if float(input.eq_C() or 0) > 0:
+            reactants["C"] = float(input.eq_C())
+        if float(input.eq_H() or 0) > 0:
+            reactants["H"] = float(input.eq_H())
+        if float(input.eq_O() or 0) > 0:
+            reactants["O"] = float(input.eq_O())
+        try:
+            if input.eq_condensed():
+                cond = evaluate_condensed_insertion(names, T, P, reactants)
+                eq_state.set({"type": "condensed", "result": cond})
+            else:
+                tp = equilibrium_tp(names, T, P, reactants)
+                eq_state.set({"type": "tp", "result": tp})
+            ui.notification_show("平衡計算 OK", type="message")
+        except Exception as e:
+            ui.notification_show(f"平衡計算エラー: {e}", type="error")
+            eq_state.set(None)
+
+    @output
+    @render.ui
+    def eq_output():
+        st = eq_state.get()
+        if st is None:
+            return ui.p("左のサイドバーで計算してください。")
+        if st["type"] == "condensed":
+            cond = st["result"]
+            r = cond.final
+            ins = cond.inserted
+            rej = cond.rejected[:5]
+            mole_rows = sorted(r.mole_fractions.items(),
+                                key=lambda kv: -kv[1])[:15]
+            return ui.div(
+                ui.h4(f"平衡組成 (T={r.T_K:.0f} K, P={r.P_Pa/101325:.2f} atm)"),
+                ui.p(f"収束: {r.converged}, 元素保存誤差: {r.element_balance_error:.2e}, "
+                     f"反復: {r.iterations}",
+                     style="color:#666;"),
+                ui.h5("Top 15 mole fractions"),
+                ui.tags.table(
+                    {"class": "table table-sm table-striped"},
+                    ui.tags.tr(ui.tags.th("species"), ui.tags.th("mole fraction")),
+                    *[ui.tags.tr(ui.tags.td(n), ui.tags.td(f"{x:.4e}"))
+                      for n, x in mole_rows],
+                ),
+                (ui.div(
+                    ui.tags.strong("⚠ 凝縮相が析出しました: "), ", ".join(ins),
+                    ui.p(f"ΔG/RT 改善 = {cond.delta_gibbs_RT:.4g}",
+                         style="color:#666; font-size:0.9em;"),
+                    style=("background:#fff7e6; border-left:3px solid #c98a00; "
+                           "padding:10px 14px; border-radius:4px; margin-top:10px;"),
+                ) if ins else ui.div(
+                    ui.tags.strong("✓ 凝縮相は析出しませんでした"),
+                    ui.p(f"検査済 (rejected): {', '.join(rej) or '—'} ほか",
+                         style="color:#666; font-size:0.85em;"),
+                    style=("background:#e8f5ea; border-left:3px solid #1a7f37; "
+                           "padding:10px 14px; border-radius:4px; margin-top:10px;"),
+                )),
+            )
+        # type == "tp"
+        r = st["result"]
+        mole_rows = sorted(r.mole_fractions.items(),
+                            key=lambda kv: -kv[1])[:20]
+        return ui.div(
+            ui.h4(f"平衡組成 (T={r.T_K:.0f} K, P={r.P_Pa/101325:.2f} atm)"),
+            ui.p(f"収束: {r.converged}, 元素保存誤差: {r.element_balance_error:.2e}",
+                 style="color:#666;"),
+            ui.tags.table(
+                {"class": "table table-sm table-striped"},
+                ui.tags.tr(ui.tags.th("species"), ui.tags.th("mole fraction")),
+                *[ui.tags.tr(ui.tags.td(n), ui.tags.td(f"{x:.4e}"))
+                  for n, x in mole_rows],
+            ),
+            (ui.div(*[ui.p("⚠ " + w, style="color:#c98a00;") for w in r.warnings])
+             if r.warnings else ""),
+        )
+
+    # ---- Phase 5+ : Reaction Path tab ----
+    rp_state = reactive.value(None)
+
+    @reactive.effect
+    @reactive.event(input.rp_btn)
+    def _rp_compute():
+        names = [s.strip() for s in (input.rp_species() or "").split(",") if s.strip()]
+        if not names:
+            ui.notification_show("species を 1 つ以上指定してください", type="warning")
+            return
+        try:
+            yaml_text = export_cantera_yaml(names)
+            # Try to use Cantera if available
+            cantera_info = None
+            try:
+                import cantera as ct
+                sol = ct.Solution(yaml=yaml_text)
+                cantera_info = (
+                    f"Cantera {ct.__version__} loaded {sol.n_species} species "
+                    f"with elements {list(sol.element_names)}"
+                )
+            except ImportError:
+                cantera_info = "Cantera 未インストール (pip install cantera で有効化可能)"
+            except Exception as e:
+                cantera_info = f"Cantera 読込エラー: {e}"
+            rp_state.set({"yaml": yaml_text, "info": cantera_info})
+            ui.notification_show("Cantera YAML 生成 OK", type="message")
+        except Exception as e:
+            ui.notification_show(f"YAML 生成エラー: {e}", type="error")
+            rp_state.set(None)
+
+    @output
+    @render.ui
+    def rp_output():
+        st = rp_state.get()
+        if st is None:
+            return ui.p("左のサイドバーで species を指定して『YAML 生成』を押してください。")
+        return ui.div(
+            ui.h4("Cantera YAML"),
+            ui.p(st["info"], style="color:#666;"),
+            ui.tags.pre(
+                st["yaml"][:5000] + ("\n...（省略）..." if len(st["yaml"]) > 5000 else ""),
+                style=("background:#1e1e1e; color:#e0e0e0; padding:12px; "
+                       "border-radius:6px; font-family:Menlo,monospace; "
+                       "font-size:0.82em; overflow-x:auto; max-height:600px;"),
+            ),
+        )
 
     # ---- Trace (all equations) tab — compact + category-grouped ----
     @output

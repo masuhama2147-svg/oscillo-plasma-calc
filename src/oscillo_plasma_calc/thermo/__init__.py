@@ -18,9 +18,13 @@ from .equilibrium_constants import log10_K_from_dG
 from .database import (
     SpeciesEntry, lookup, list_species, available_datasets, species_count,
 )
+from .wilhoit import WilhoitCp, fit_wilhoit_to_nasa, cp_R_extrapolated
+from .cantera_export import export_cantera_yaml, write_cantera_yaml
 
 __all__ = [
     "Species", "NASA7", "NASA9", "log10_K_from_dG",
     "SpeciesEntry", "lookup", "list_species",
     "available_datasets", "species_count",
+    "WilhoitCp", "fit_wilhoit_to_nasa", "cp_R_extrapolated",
+    "export_cantera_yaml", "write_cantera_yaml",
 ]
