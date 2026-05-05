@@ -20,7 +20,7 @@ from shiny import App, reactive, render, ui
 from shinywidgets import output_widget, render_widget
 
 from oscillo_plasma_calc.io_layer import load_xlsx, load_csv
-from oscillo_plasma_calc.pipeline import analyze_electrical
+from oscillo_plasma_calc.pipeline import analyze_electrical, _bind
 from oscillo_plasma_calc.signal.fft import power_spectrum
 from oscillo_plasma_calc.plasma import (
     electron_temperature_boltzmann,
@@ -29,12 +29,37 @@ from oscillo_plasma_calc.plasma import (
     ohmic_heating_density, paschen_breakdown_voltage,
 )
 from oscillo_plasma_calc.chemistry import g_value, chemical_efficiency
+from oscillo_plasma_calc.chemistry.oil_synthesis import (
+    specific_energy_input,
+    energy_cost,
+    co2_conversion_rate,
+    single_pass_energy_efficiency,
+    asf_chain_probability,
+)
+from oscillo_plasma_calc.plasma.nonequilibrium import (
+    reduced_electric_field,
+    mean_electron_energy,
+    non_equilibrium_ratio,
+)
 from oscillo_plasma_calc.spectroscopy import (
     excitation_temperature, load_intensity_csv, list_elements, get_lines,
 )
 from oscillo_plasma_calc.report.markdown import build_markdown
 from oscillo_plasma_calc.docs import get_explanation
-from oscillo_plasma_calc.qa import validate_csv
+from oscillo_plasma_calc.qa import validate_csv, evaluate_gates
+from oscillo_plasma_calc.ui.components.gate_panel import render_gate_panel
+from oscillo_plasma_calc.ui.components import (
+    anomaly_markdown,
+    apply_research_plot_layout,
+    display_value,
+    export_trace_csv,
+    figure_guidance_markdown,
+    important_traces,
+    paper_candidate_traces,
+    safe_filename,
+    status_label,
+    waveform_annotations,
+)
 
 
 REPO_ROOT = SRC.parent
@@ -392,6 +417,83 @@ def _trace_controls() -> ui.TagList:
     )
 
 
+def _status_color(level: str) -> str:
+    return _LEVEL_COLORS.get(level, ("#666", ""))[0]
+
+
+def _kpi_table(title: str, traces: list, empty: str = "計算後に表示されます。") -> ui.TagList:
+    rows = []
+    for tr in traces:
+        if tr is None:
+            continue
+        if tr.scalar() is None:
+            continue
+        level = status_label(tr)
+        rows.append(ui.tags.tr(
+            ui.tags.td(tr.name),
+            ui.tags.td(display_value(tr), style="font-weight:700; text-align:right;"),
+            ui.tags.td(tr.unit),
+            ui.tags.td(level, style=f"color:{_status_color(level)}; font-weight:700;"),
+            ui.tags.td(", ".join(tr.sources) or "-"),
+        ))
+    if not rows:
+        return ui.div(ui.h4(title), ui.p(empty, style="color:#777;"))
+    return ui.div(
+        ui.h4(title),
+        ui.tags.table(
+            {"class": "table table-sm table-striped"},
+            ui.tags.thead(ui.tags.tr(*[
+                ui.tags.th(x) for x in ("量", "値", "単位", "判定", "根拠")
+            ])),
+            ui.tags.tbody(*rows),
+        ),
+    )
+
+
+def _all_scalar_traces(b, plasma_results, chem_results, spec_traces) -> list:
+    all_traces = []
+    if b:
+        all_traces.extend([tr for tr in b.as_list() if tr.scalar() is not None])
+    all_traces.extend([tr for tr in plasma_results if tr.scalar() is not None])
+    all_traces.extend([tr for tr in chem_results if tr.scalar() is not None])
+    all_traces.extend([tr for tr in spec_traces if tr.scalar() is not None])
+    return all_traces
+
+
+def _trace_researcher_summary(traces: list) -> ui.TagList:
+    alerts = [tr for tr in traces if status_label(tr) in {"warning", "error", "notice"}]
+    important = important_traces(traces)[:8]
+    paper = paper_candidate_traces(traces)[:10]
+    alert_panel = _kpi_table("重要警告・注意", alerts[:8], empty="警告・注意はありません。")
+    important_panel = _kpi_table("油合成・装置判断 KPI", important,
+                                 empty="主要 KPI は計算後に表示されます。")
+    paper_panel = _kpi_table("論文・研究ノートに載せる候補値", paper,
+                             empty="候補値は計算後に表示されます。")
+    formula_cards = []
+    for tr in important[:6]:
+        formula_cards.append(ui.tags.details(
+            ui.tags.summary(f"{tr.name}: {display_value(tr)} {tr.unit}",
+                            style="cursor:pointer; font-weight:700;"),
+            ui.p(ui.HTML(fr"$$ {tr.equation_latex} $$")),
+            *([ui.p(ui.HTML(fr"$$ {tr.substitution_latex} $$"))]
+              if tr.substitution_latex else []),
+            style=("border:1px solid #e5e7eb; border-radius:6px; padding:8px 10px; "
+                   "margin:6px 0; background:white;"),
+        ))
+    return ui.div(
+        ui.div(
+            alert_panel,
+            important_panel,
+            paper_panel,
+            style="display:grid; grid-template-columns:repeat(3, minmax(260px, 1fr)); gap:14px;",
+        ),
+        ui.h4("主要 KPI の計算式ショートカット", style="margin-top:18px;"),
+        *(formula_cards or [ui.p("計算後に式が表示されます。", style="color:#777;")]),
+        style=("background:#f8fafc; border:1px solid #d9e2ec; border-radius:8px; "
+               "padding:14px; margin-bottom:14px;"),
+    )
+
+
 def _render_trace_categorized(traces: list) -> ui.TagList:
     """Group traces by category + render each group as a collapsible section."""
     groups: dict[str, list] = {}
@@ -501,6 +603,11 @@ app_ui = ui.page_navbar(
                                   "DC オフセット補正を自動適用", value=True),
                 ui.input_checkbox("preproc_align",
                                   "時間軸を最初の V 立ち上がりにそろえる", value=False),
+                ui.input_radio_buttons(
+                    "plot_mode", "図表モード",
+                    {"screen": "Screen（解析用）", "paper": "Paper（論文補助図）"},
+                    selected="screen",
+                ),
                 ui.tags.hr(),
                 ui.h5("投入電力の外部チェック用（任意）"),
                 ui.input_numeric("socket_power_w",
@@ -615,6 +722,7 @@ app_ui = ui.page_navbar(
                 ui.h4("Ohmic"),
                 ui.input_numeric("sigma_liquid", "σ [S/m]", 0.01),
                 ui.input_numeric("E_field", "E [V/m]", 1e6),
+                ui.input_numeric("T_gas_K", "T_gas [K]（非平衡診断）", 300, min=1),
                 ui.h4("Paschen"),
                 ui.input_numeric("p_gas", "p [Pa]", 101325),
                 ui.input_numeric("d_gap_mm", "d [mm]", 1.0),
@@ -641,8 +749,16 @@ app_ui = ui.page_navbar(
             ui.sidebar(
                 ui.h4("GC 測定入力"),
                 ui.input_numeric("n_prod_mol", "生成モル数 [mol]", 1e-6),
+                ui.input_numeric("n_co2_in_mol", "CO₂ 入口モル数 [mol]", 1e-4),
+                ui.input_numeric("n_co2_out_mol", "CO₂ 出口モル数 [mol]", 9e-5),
                 ui.input_numeric("delta_H", "ΔH [kJ/mol]", 286,
                                  min=0),
+                ui.tags.hr(),
+                ui.h5("ASF 炭素数分布（任意）"),
+                ui.input_numeric("asf_c1", "C1 weight fraction", 0.5, min=0),
+                ui.input_numeric("asf_c2", "C2 weight fraction", 0.25, min=0),
+                ui.input_numeric("asf_c3", "C3 weight fraction", 0.12, min=0),
+                ui.input_numeric("asf_c4", "C4+ weight fraction", 0.06, min=0),
                 ui.input_action_button("chem_btn", "計算", class_="btn-primary"),
                 ui.tags.hr(),
                 ui.p("E_plasma は Electrical タブの P̄×T を自動流用。"),
@@ -709,7 +825,10 @@ app_ui = ui.page_navbar(
     ui.nav_panel(
         "Export",
         ui.download_button("dl_md", "Markdown レポートをダウンロード"),
-        ui.download_button("dl_csv", "解析済み CSV をダウンロード"),
+        ui.download_button("dl_csv", "解析済み量 CSV をダウンロード"),
+        ui.p("CSV は quantity,value,unit,status,source,equation_key 形式です。"
+             "元波形CSVではなく、論文補助表に使う計算済み量を出力します。",
+             style="color:#555; margin-top:8px;"),
     ),
     title="液中プラズマ オシロスコープ解析",
     header=MATH_HEADER,
@@ -791,6 +910,7 @@ def server(input, output, session):
     @render.ui
     def upload_summary():
         wf = current.get()
+        b = bundle.get()
         if wf is None:
             return ui.div(
                 ui.p("まだデータが読み込まれていません。"),
@@ -799,18 +919,36 @@ def server(input, output, session):
                 style="padding:10px 0;",
             )
         vpp = wf.v.max()-wf.v.min(); ipp = wf.i.max()-wf.i.min()
+        baseline_n = max(1, int(wf.n * 0.02))
+        v_offset = float(np.mean(wf.v[:baseline_n]))
+        i_offset = float(np.mean(wf.i[:baseline_n]))
+        prf = float(input.prf_hz())
+        budget_margin = b.budget.scalar() if b and b.budget else None
         meta_items = [ui.tags.li(f"{k}: {v}") for k, v in wf.meta.items()]
+        cards = [
+            ("Samples", f"{wf.n:,}", "N"),
+            ("Δt / fs", f"{wf.dt*1e9:.3f} ns / {wf.fs/1e6:.1f} MHz", "sampling"),
+            ("Window", f"{wf.duration*1e6:.3f} μs", "T"),
+            ("Vpp", f"{vpp/1000:.3f} kV", "voltage"),
+            ("Ipp", f"{ipp:.3g} A", "current"),
+            ("PRF", f"{prf:.4g} Hz", "input"),
+            ("DC offset", f"V {v_offset:.3g} / I {i_offset:.3g}", "pre-trigger"),
+            ("Budget margin", f"{budget_margin:.3g} %" if budget_margin is not None else "-", "1 kW rule"),
+        ]
         return ui.div(
             ui.div(
                 ui.h5(f"📁 {wf.label}",
                       style="color:#1a7f37; margin-bottom:6px;"),
-                ui.tags.ul(
-                    ui.tags.li(f"サンプル数 N = {wf.n:,}"),
-                    ui.tags.li(f"Δt = {wf.dt*1e9:.3f} ns "
-                               f"(fs = {wf.fs/1e6:.1f} MHz)"),
-                    ui.tags.li(f"測定期間 T = {wf.duration*1e6:.3f} μs"),
-                    ui.tags.li(f"Vpp = {vpp:.1f} V ({vpp/1000:.2f} kV)"),
-                    ui.tags.li(f"Ipp = {ipp:.2f} A"),
+                ui.div(
+                    *[ui.div(
+                        ui.div(label, style="color:#667085; font-size:0.82em;"),
+                        ui.div(value, style="font-size:1.15em; font-weight:700;"),
+                        ui.div(note, style="color:#667085; font-size:0.78em;"),
+                        style=("background:white; border:1px solid #d7e3d8; border-radius:6px; "
+                               "padding:10px 12px; min-height:84px;"),
+                    ) for label, value, note in cards],
+                    style=("display:grid; grid-template-columns:repeat(4, minmax(150px, 1fr)); "
+                           "gap:10px; margin:10px 0;"),
                 ),
                 ui.tags.details(
                     ui.tags.summary("メタデータ詳細"),
@@ -868,19 +1006,29 @@ def server(input, output, session):
     @render.ui
     def next_actions():
         wf = current.get()
+        b = bundle.get()
         if wf is None:
             return ui.p("データ読み込み後、次のステップが表示されます。",
                         style="color:#888;")
+        traces = b.as_list() if b else []
+        alerts = [tr for tr in traces if status_label(tr) in {"warning", "error"}]
+        action_items = []
+        if alerts:
+            action_items.append("【Trace】警告・異常のみフィルタで原因候補と根拠論文を確認")
+        if b and b.v_rise.anomaly and b.v_rise.anomaly.level in {"warning", "error"}:
+            action_items.append("【Waveform】立ち上がり注釈を拡大し、プローブ帯域とトリガ位置を確認")
+        if b and b.budget and b.budget.anomaly and b.budget.anomaly.level in {"warning", "error"}:
+            action_items.append("【Electrical】P(t)、Duty、Ppeak·D を見直し、1 kW 予算を確認")
+        action_items.extend([
+            "【Electrical】P(t)・累積E(t)・Lissajousを比較",
+            "【FFT】支配周波数と高調波、Nyquist線を確認",
+            "【Chemistry】GC値を入れて G値・SEI・油化KPI を算出",
+            "【Export】Markdown / 解析済み量CSV を保存",
+        ])
         return ui.div(
-            ui.p("✓ データ読み込み成功。以下のタブで解析結果が確認できます:",
+            ui.p("✓ データ読み込み成功。優先順に以下を確認してください:",
                  style="color:#1a7f37; font-weight:600;"),
-            ui.tags.ol(
-                ui.tags.li("【Waveform】V(t) / I(t) の波形を目視"),
-                ui.tags.li("【Electrical】ピーク電力・平均電力・Lissajous 等のサマリ"),
-                ui.tags.li("【FFT】周波数スペクトルで駆動源を確認"),
-                ui.tags.li("【Trace】各物理量を 3 レベル解説 + エラーラインで点検"),
-                ui.tags.li("【Export】Markdown / PDF レポート出力"),
-            ),
+            ui.tags.ol(*[ui.tags.li(item) for item in action_items]),
             style="padding:8px 0;",
         )
 
@@ -918,11 +1066,39 @@ def server(input, output, session):
         wf = current.get()
         if wf is None:
             return go.Figure()
+        mode = input.plot_mode()
+        ann = waveform_annotations(wf.t, wf.v, wf.i)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=wf.t*1e6, y=wf.v, name="V(t) [V]",
                                  line=dict(color="#2a6fb0")))
         fig.add_trace(go.Scatter(x=wf.t*1e6, y=wf.i, name="I(t) [A]",
                                  yaxis="y2", line=dict(color="#d64545")))
+        if ann:
+            fig.add_vline(x=ann["t10_us"], line_dash="dot", line_color="#6b7280",
+                          annotation_text="10% rise")
+            fig.add_vline(x=ann["t90_us"], line_dash="dot", line_color="#111827",
+                          annotation_text="90% rise")
+            fig.add_vline(x=ann["t_zero_us"], line_dash="dash", line_color="#8a6d3b",
+                          annotation_text="zero cross")
+            fig.add_trace(go.Scatter(
+                x=[ann["t_vmax_us"], ann["t_vmin_us"]],
+                y=[ann["vmax"], ann["vmin"]],
+                mode="markers+text",
+                text=["Vmax", "Vmin"],
+                textposition="top center",
+                marker=dict(size=9, color="#2a6fb0"),
+                name="V peaks",
+            ))
+            fig.add_trace(go.Scatter(
+                x=[ann["t_imax_us"]],
+                y=[ann["imax"]],
+                mode="markers+text",
+                text=["|I|max"],
+                textposition="bottom center",
+                marker=dict(size=9, color="#d64545", symbol="diamond"),
+                name="I peak",
+                yaxis="y2",
+            ))
         fig.update_layout(
             title=f"Waveform — {wf.label}",
             xaxis_title="time [μs]",
@@ -930,7 +1106,7 @@ def server(input, output, session):
             yaxis2=dict(title="I [A]", overlaying="y", side="right"),
             height=500,
         )
-        return fig
+        return apply_research_plot_layout(fig, mode)
 
     @output
     @render_widget
@@ -938,13 +1114,27 @@ def server(input, output, session):
         b = bundle.get()
         if b is None:
             return go.Figure()
+        mode = input.plot_mode()
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=b.waveform.t*1e6, y=b.p_inst.value,
-                                 name="P(t) [W]"))
+                                 name="P(t) [W]", line=dict(color="#2a6fb0")))
+        e_cum = b.energy.extra.get("E_cumulative")
+        if e_cum is not None:
+            fig.add_trace(go.Scatter(
+                x=b.waveform.t*1e6, y=e_cum,
+                name="E(t) cumulative [J]",
+                yaxis="y2",
+                line=dict(color="#1a7f37"),
+            ))
+        if b.p_peak.scalar() is not None:
+            fig.add_hline(y=b.p_peak.scalar(), line_dash="dot", line_color="#c98a00",
+                          annotation_text="|P|max")
         fig.update_layout(title="Instantaneous power P(t) = V·I",
-                          xaxis_title="time [μs]", yaxis_title="P [W]",
+                          xaxis_title="time [μs]",
+                          yaxis=dict(title="P [W]"),
+                          yaxis2=dict(title="E cumulative [J]", overlaying="y", side="right"),
                           height=420)
-        return fig
+        return apply_research_plot_layout(fig, mode)
 
     @output
     @render_widget
@@ -952,13 +1142,22 @@ def server(input, output, session):
         b = bundle.get()
         if b is None:
             return go.Figure()
+        mode = input.plot_mode()
         q = b.lissajous.extra["q"]
         fig = go.Figure(go.Scatter(x=q*1e9, y=b.waveform.v, mode="lines",
-                                   line=dict(color="#7a4fb0")))
+                                   line=dict(color="#7a4fb0"), name="V-q loop"))
+        area = b.lissajous.extra.get("loop_area_J")
+        if area is not None:
+            fig.add_annotation(
+                xref="paper", yref="paper", x=0.02, y=0.98, showarrow=False,
+                align="left",
+                text=f"loop area = {area:.4g} J/cycle<br>f = {b.lissajous.extra.get('f_hz', float('nan')):.4g} Hz",
+                bgcolor="rgba(255,255,255,0.8)",
+            )
         fig.update_layout(title="Lissajous (V vs q)",
                           xaxis_title="q [nC]", yaxis_title="V [V]",
                           height=420)
-        return fig
+        return apply_research_plot_layout(fig, mode)
 
     @output
     @render_widget
@@ -966,12 +1165,26 @@ def server(input, output, session):
         wf = current.get()
         if wf is None:
             return go.Figure()
+        mode = input.plot_mode()
         freq_v, amp_v = power_spectrum(wf.v, wf.dt)
         freq_i, amp_i = power_spectrum(wf.i, wf.dt)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=freq_v/1e6, y=amp_v, name="V spectrum"))
         fig.add_trace(go.Scatter(x=freq_i/1e6, y=amp_i, name="I spectrum",
                                  yaxis="y2"))
+        nyq_mhz = wf.fs / 2 / 1e6
+        dom_idx = int(np.nanargmax(amp_v[1:]) + 1) if len(amp_v) > 1 else 0
+        dom_mhz = float(freq_v[dom_idx] / 1e6) if dom_idx else 0.0
+        for mult, color in ((1, "#111827"), (2, "#6b7280"), (3, "#9ca3af")):
+            x = dom_mhz * mult
+            if x > 0 and x <= nyq_mhz:
+                fig.add_vline(x=x, line_dash="dash" if mult == 1 else "dot",
+                              line_color=color,
+                              annotation_text=f"{mult}f = {x:.3g} MHz")
+        fig.add_vline(x=nyq_mhz, line_dash="solid", line_color="#c33333",
+                      annotation_text=f"Nyquist {nyq_mhz:.3g} MHz")
+        fig.add_vrect(x0=nyq_mhz, x1=max(nyq_mhz * 1.05, float(freq_v[-1] / 1e6)),
+                      fillcolor="#c33333", opacity=0.08, line_width=0)
         fig.update_layout(
             title="Power spectrum (rFFT)",
             xaxis=dict(title="frequency [MHz]", type="log"),
@@ -979,7 +1192,7 @@ def server(input, output, session):
             yaxis2=dict(title="|I| [A]", overlaying="y", side="right"),
             height=500,
         )
-        return fig
+        return apply_research_plot_layout(fig, mode)
 
     @output
     @render.ui
@@ -995,6 +1208,10 @@ def server(input, output, session):
         body = [ui.tags.tr(*[ui.tags.td(c) for c in row]) for row in rows]
         return ui.div(
             ui.h4(f"電気系サマリ — {b.waveform.label}"),
+            _kpi_table("電力・エネルギー KPI", [
+                b.p_peak, b.energy, b.p_mean, b.lissajous,
+                b.pulse_e, b.duty, b.p_eff, b.abs_p_avg, b.budget,
+            ]),
             ui.tags.table(
                 {"class": "table table-striped"},
                 ui.tags.thead(header), ui.tags.tbody(*body),
@@ -1030,14 +1247,21 @@ def server(input, output, session):
             ui.notification_show(f"Stark/Debye: {e}", type="warning")
         try:
             res.append(ohmic_heating_density(input.sigma_liquid(), input.E_field()))
+            en = reduced_electric_field(input.E_field(), input.p_gas(), input.T_gas_K())
+            res.append(en)
+            if en.scalar() and en.scalar() > 0:
+                res.append(mean_electron_energy(en.scalar()))
+            if res and res[0].scalar() and res[0].scalar() > 0:
+                # 2-line Te is eV; convert to K for the non-equilibrium ratio.
+                res.append(non_equilibrium_ratio(res[0].scalar() * 11604.518, input.T_gas_K()))
         except Exception as e:
-            ui.notification_show(f"Ohmic: {e}", type="warning")
+            ui.notification_show(f"Ohmic/non-eq: {e}", type="warning")
         try:
             res.append(paschen_breakdown_voltage(
                 input.p_gas(), input.d_gap_mm() * 1e-3))
         except Exception as e:
             ui.notification_show(f"Paschen: {e}", type="warning")
-        plasma_results.set(res)
+        plasma_results.set([_bind(tr) for tr in res])
 
     @output
     @render.ui
@@ -1045,7 +1269,14 @@ def server(input, output, session):
         res = plasma_results.get()
         if not res:
             return ui.p("左の入力を埋めて「計算」を押してください。")
-        return ui.div(*[trace_to_html(tr, compact=False) for tr in res])
+        diagnostics = [tr for tr in res if tr.explanation_key in {
+            "boltzmann_two_line", "stark", "debye", "plasma_freq", "e_over_n",
+            "mean_e_energy", "tv_rot_ratio",
+        }]
+        return ui.div(
+            _kpi_table("反応場診断 KPI", diagnostics),
+            *[trace_to_html(tr, compact=False) for tr in res],
+        )
 
     # ---- Chemistry tab ----
     chem_results = reactive.value([])
@@ -1059,11 +1290,24 @@ def server(input, output, session):
                                  type="warning")
             return
         E_plasma = b.energy.value
-        res = [
-            g_value(input.n_prod_mol(), E_plasma),
-            chemical_efficiency(input.delta_H(), input.n_prod_mol(), E_plasma),
-        ]
-        chem_results.set(res)
+        g = g_value(input.n_prod_mol(), E_plasma)
+        eta = chemical_efficiency(input.delta_H(), input.n_prod_mol(), E_plasma)
+        sei = specific_energy_input(E_plasma, input.n_co2_in_mol())
+        ec = energy_cost(E_plasma, input.n_prod_mol())
+        chi = co2_conversion_rate(input.n_co2_in_mol(), input.n_co2_out_mol())
+        eta_se = single_pass_energy_efficiency(
+            chi.scalar() or float("nan"),
+            input.delta_H(),
+            sei.scalar() or float("nan"),
+        )
+        asf = asf_chain_probability({
+            1: input.asf_c1(),
+            2: input.asf_c2(),
+            3: input.asf_c3(),
+            4: input.asf_c4(),
+        })
+        res = [g, eta, sei, ec, chi, eta_se, asf]
+        chem_results.set([_bind(tr) for tr in res])
 
     @output
     @render.ui
@@ -1071,7 +1315,10 @@ def server(input, output, session):
         res = chem_results.get()
         if not res:
             return ui.p("左の入力を埋めて「計算」を押してください。")
-        return ui.div(*[trace_to_html(tr, compact=False) for tr in res])
+        return ui.div(
+            _kpi_table("油化判断 KPI", res),
+            *[trace_to_html(tr, compact=False) for tr in res],
+        )
 
     # ---- 励起温度 Te tab ----
     spec_traces = reactive.value([])
@@ -1120,7 +1367,7 @@ def server(input, output, session):
         try:
             res, tr = excitation_temperature(el, intensities)
             spec_bp.set(res)
-            spec_traces.set([tr])
+            spec_traces.set([_bind(tr)])
             ui.notification_show(
                 f"{el}: Te = {res.Te_K:.4g} K  (n={res.n_used})",
                 type="message")
@@ -1145,22 +1392,32 @@ def server(input, output, session):
             name="観測点",
         ))
         # fit line
-        import numpy as np
         x_arr = np.array(bp.xs)
         intercept = (sum(bp.ys) - bp.slope * sum(bp.xs)) / bp.n_used
         xs_fit = np.linspace(x_arr.min(), x_arr.max(), 2)
         fig.add_trace(go.Scatter(
             x=xs_fit, y=bp.slope * xs_fit + intercept,
             mode="lines", line=dict(color="#d64545", dash="dash"),
-            name=f"fit (slope={bp.slope:.3g})",
+            name=f"fit (slope={bp.slope:.3g}, R²={bp.r_squared:.3f})",
         ))
+        color = "#1a7f37" if bp.r_squared >= 0.95 else "#c98a00" if bp.r_squared >= 0.85 else "#c33333"
+        provisional = "" if bp.is_te_reliable else " ⚠ 参考値（下流不可）"
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.02, y=0.98, showarrow=False,
+            align="left",
+            text=(f"R² = {bp.r_squared:.4f}<br>n = {bp.n_used}<br>"
+                  f"{bp.lte_quality_label}{provisional}"),
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor=color,
+        )
+        te_label = f"Te={bp.Te_K:.4g} K" if bp.is_te_reliable else f"Te=(参考値) {bp.Te_K:.4g} K"
         fig.update_layout(
-            title=f"Boltzmann plot — {bp.element}, Te={bp.Te_K:.4g} K (n={bp.n_used})",
+            title=f"Boltzmann plot — {bp.element}, {te_label} (n={bp.n_used})",
             xaxis_title="x = E_u − E_l  [eV]",
             yaxis_title="y = ln(I / (g A ν))",
             height=500,
         )
-        return fig
+        return apply_research_plot_layout(fig, input.plot_mode())
 
     @output
     @render.ui
@@ -1172,10 +1429,35 @@ def server(input, output, session):
                         "CSV をアップロードすれば強度欄が自動で埋まります。")
         parts = [trace_to_html(tr, compact=False) for tr in traces]
         if bp is not None and bp.n_used >= 2:
+            if not bp.is_te_reliable:
+                # Phase 0.2: provisional banner (downstream computation should be locked)
+                parts.insert(0, ui.div(
+                    ui.tags.strong("⚠ この Te は参考値です（下流計算には使えません）"),
+                    ui.p(bp.reliability_warning, style="margin:6px 0;"),
+                    ui.tags.ul(
+                        ui.tags.li("採用線が 3 本未満、または E_u 差が小さすぎる可能性"),
+                        ui.tags.li("強度 0、自己吸収、感度補正不足、線ラベル違いを確認"),
+                        ui.tags.li("タングステン電極の 4 本線（下準位 6s 共通）が推奨"),
+                    ),
+                    style=("background:#fdeaea; border-left:4px solid #c33333; "
+                           "padding:12px 16px; border-radius:6px; "
+                           "margin-bottom:12px; color:#7a1c1c;"),
+                ))
+            else:
+                parts.insert(0, ui.div(
+                    ui.tags.strong("✓ この Te は信頼できます"),
+                    ui.p(f"R² = {bp.r_squared:.3f} ≥ 0.85, "
+                         f"採用線数 = {bp.n_used} ≥ 3 → 下流計算で使用可。",
+                         style="margin:6px 0;"),
+                    style=("background:#e8f5ea; border-left:4px solid #1a7f37; "
+                           "padding:12px 16px; border-radius:6px; "
+                           "margin-bottom:12px; color:#0c5d23;"),
+                ))
             parts.append(ui.tags.details(
                 ui.tags.summary("使用した線と除外線"),
                 ui.p("使用: " + ", ".join(bp.line_labels)),
                 ui.p("除外 (I=0): " + (", ".join(bp.excluded) or "なし")),
+                ui.p(f"R²: {bp.r_squared:.4f} / LTE 判定: {bp.lte_quality_label}"),
             ))
         return ui.div(*parts)
 
@@ -1204,17 +1486,32 @@ def server(input, output, session):
                 tr.category = "plasma"
             all_traces.append(tr)
 
+        # Phase 1.2: G1-G6 ゲート評価
+        gates = evaluate_gates(
+            validation=validation.get(),
+            bundle=b,
+            spec_bp=spec_bp.get(),
+        )
+        gate_panel = render_gate_panel(gates)
+
         if not all_traces:
-            return ui.p("データを読み込み、各タブで計算してください。")
+            return ui.div(
+                gate_panel,
+                ui.p("データを読み込み、各タブで計算してください。",
+                     style="margin-top:14px;"),
+            )
         return ui.div(
+            gate_panel,
             _trace_stats_header(all_traces),
+            _trace_researcher_summary(all_traces),
             _trace_controls(),
             _render_trace_categorized(all_traces),
             _TRACE_FILTER_JS,
         )
 
     # ---- Export ----
-    @session.download(filename=lambda: f"{(current.get().label if current.get() else 'report')}.md")
+    @session.download(filename=lambda: safe_filename(
+        current.get().label if current.get() else "report", "md"))
     def dl_md():
         b = bundle.get()
         if b is None:
@@ -1222,17 +1519,36 @@ def server(input, output, session):
             return
         all_tr = (list(b.as_list()) + list(plasma_results.get())
                   + list(chem_results.get()) + list(spec_traces.get()))
-        yield build_markdown(b.waveform.label, b.waveform.meta, all_tr)
+        base = build_markdown(b.waveform.label, b.waveform.meta, all_tr)
+        experiment = (
+            "## 実験条件レビュー\n\n"
+            f"- サンプル数 N: {b.waveform.n:,}\n"
+            f"- Δt: {b.waveform.dt*1e9:.4g} ns\n"
+            f"- fs: {b.waveform.fs/1e6:.4g} MHz\n"
+            f"- 測定窓: {b.waveform.duration*1e6:.4g} µs\n"
+            f"- PRF: {float(input.prf_hz()):.6g} Hz\n\n"
+        )
+        kpi_lines = ["## 主要 KPI 表", "",
+                     "| group | quantity | value | unit | status | source |",
+                     "|---|---|---:|---|---|---|"]
+        for row in paper_candidate_traces(all_tr):
+            kpi_lines.append(
+                f"| {row.category} | {row.name} | {display_value(row)} | "
+                f"{row.unit} | {status_label(row)} | {', '.join(row.sources)} |"
+            )
+        kpi_block = "\n".join(kpi_lines) + "\n\n"
+        yield experiment + kpi_block + anomaly_markdown(all_tr) + figure_guidance_markdown() + base
 
-    @session.download(filename=lambda: f"{(current.get().label if current.get() else 'waveform')}.csv")
+    @session.download(filename=lambda: safe_filename(
+        f"{(current.get().label if current.get() else 'analysis')}_quantities", "csv"))
     def dl_csv():
-        wf = current.get()
-        if wf is None:
+        b = bundle.get()
+        if b is None:
             yield "no data"
             return
-        yield "time_s,voltage_V,current_A\n"
-        for tk, vk, ik in zip(wf.t, wf.v, wf.i):
-            yield f"{tk:.6e},{vk:.6e},{ik:.6e}\n"
+        all_tr = (list(b.as_list()) + list(plasma_results.get())
+                  + list(chem_results.get()) + list(spec_traces.get()))
+        yield export_trace_csv(all_tr)
 
 
 app = App(app_ui, server)

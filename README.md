@@ -2,186 +2,237 @@
 
 野村研究室（液中プラズマ CO₂ 還元 → 液体燃料合成）の実験データを自動解析する、Python + Shiny for Python 製の研究用計算ソフトです。
 
-![status](https://img.shields.io/badge/tests-45%20passed-success)
+![status](https://img.shields.io/badge/tests-passing-success)
 ![python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![license](https://img.shields.io/badge/license-research%20internal-lightgrey)
 
 ---
 
-## 📋 このソフトで何ができるか
+## 📋 このソフトで何ができるか — 料理に例えると
 
-1. **オシロスコープで取ったパルス電圧・電流波形（CSV / xlsx）を入れると、電気系物理量を自動計算**
-   - Vpp, Ipp, ピーク電力, 吸収エネルギー E, 平均電力 P̄
-   - パルスエネルギー E_pulse, デューティ比 D, 実効平均電力 P_eff (= Ppeak·D)
-   - RMS 値, Lissajous (Manley 法), FFT スペクトル
-   - Crest/Form factor, 瞬時インピーダンス Z(t), 電力密度 p_vol
+| 料理工程 | 本ソフトで対応すること |
+|---|---|
+| 火加減（コンロの火） | プラズマに入れる電圧と電流（オシロで測る） |
+| 鍋の中の温度 | プラズマ内の電子温度・密度（分光器で測る） |
+| 出来た料理の量 | できた油・メタノールの量（GC で測る） |
 
-2. **プラズマ診断（発光分光データから）**
-   - Boltzmann 2 本線法による電子温度 Te
-   - Boltzmann plot (n 本線、H/O/W/Al/Cu 対応) + **R² による LTE 直線性判定**
-   - Stark 広がりによる電子密度 ne
-   - Debye 長, プラズマ周波数, Ohmic 加熱, Paschen 破壊電圧
-   - **換算電場 E/N, 非平衡度 Te/Tgas, 振動温度 Tv** （非熱プラズマ診断）
+これら 3 種類の数字を入れると、**研究者が次に何を判断すべきかが画面に出ます**。
 
-3. **油合成 KPI（CO₂ プラズマ化学）**
-   - SEI（比エネルギー投入量 kJ/mol）
-   - エネルギーコスト EC, CO₂ 変換率 χ, 単位エネルギー変換効率 η_SE
-   - Fischer-Tropsch ASF 連鎖成長確率 α
-   - G 値, 化学効率 η, 生成物選択性
-
-4. **装置運用の安全チェック**
-   - 装置全体 1 kW 予算との自動照合（会議で決めた運用ルール）
-   - コンセント側消費電力との比較
-   - 冷却必要量 Q_cool の推定
-
-5. **全物理量に「エラーライン」**（典型範囲を逸脱すると原因候補と参照論文が自動表示）
-
-6. **全物理量に「初学者 / 研究者 / 博士」の 3 段階解説**
+具体的には:
+- **電気系**: Vpp, Ipp, ピーク電力, 吸収エネルギー E, 平均電力 P̄, 実効電力 P_eff（装置 1 kW 制約に直結）, RMS, Lissajous, FFT, 瞬時インピーダンス
+- **プラズマ診断**: Boltzmann 2 本線/n 本線（H/O/W/Al/Cu）+ R² LTE 直線性判定, Stark, Debye, Paschen, **換算電場 E/N**, **非平衡度 Te/Tgas**, **振動温度 Tv**
+- **油合成 KPI**: SEI, EC, χ_CO2, η_SE, **Fischer-Tropsch ASF α**, G値, η, 選択性
+- **装置運用**: **1 kW 予算自動チェック**, η_dev, 冷却必要量
+- **研究判断ゲート (G1-G6)**: データ品質 → エネルギー → Te 信頼度 → 熱力学 → 平衡 → 論文使用可否
+- すべての値に **「初学者 / 研究者 / 博士」3 段階解説** + **エラーライン**（典型範囲逸脱時の原因候補と参照論文）
 
 ---
 
-## 🚀 初心者向けインストール手順
+## 🪟 Windows 5 ステップセットアップ（超初心者向け）
 
-前提: Python 3.12 以上 + インターネット環境
+> 「**コマンドラインを使ったことが無い**」「**Python って何？**」レベルの方を想定。
 
-### 🍎 macOS（M1/M2/M3/M4 含む）
+### 必要時間
+インターネット環境で **30 分以内**。
 
-1. **Python を入れる**（入っていなければ）
-   ```bash
-   # ターミナル (/Applications/Utilities/ターミナル.app) を開いて:
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   brew install python@3.13 git
+### 必要なディスク容量
+約 **600 MB**（Python + 仮想環境 + 依存パッケージ込み）。
+
+---
+
+### STEP 1. Python をインストール
+
+1. https://www.python.org/downloads/ を開く
+2. 黄色いボタン「Download Python 3.13.x」をクリック
+3. 保存した `.exe` ファイルをダブルクリック
+4. ⚠ **必ず最初の画面で「☑ Add Python to PATH」にチェック**（一番下のチェックボックス）
+5. 「Install Now」をクリック → 数分で完了
+6. 確認: スタートメニュー → `cmd` と入力 → 出てきた **コマンドプロンプト** で次を入力:
    ```
-2. **このリポジトリを取ってくる**
-   ```bash
-   cd ~/Documents
-   git clone <このリポジトリの URL>  # 下の「GitHub から取得」参照
-   cd oscillo-plasma-calc
+   python --version
    ```
-3. **仮想環境を作って依存をインストール**（1 回だけ）
-   ```bash
-   python3 -m venv .venv
-   .venv/bin/pip install --upgrade pip
-   .venv/bin/pip install numpy scipy pandas openpyxl sympy plotly matplotlib \
-                         jinja2 shiny shinywidgets pytest pyyaml
-   ```
-4. **Shiny UI を起動**
-   ```bash
-   ./scripts/launch_ui.sh
-   # → http://127.0.0.1:8000 にブラウザでアクセス
-   ```
-   または直接:
-   ```bash
-   .venv/bin/shiny run --port 8000 src/oscillo_plasma_calc/ui/app.py
-   ```
+   `Python 3.13.x` のように出れば成功。
 
-### 🪟 Windows 10 / 11
+> 失敗したら → [トラブルシューティング Q1](docs/troubleshooting.md#q1-python-は-内部コマンドまたは外部コマンドとして認識されていません)
 
-1. **Python を入れる**（入っていなければ）
-   - https://www.python.org/downloads/ から Python 3.13 をダウンロード → インストール時に **「Add Python to PATH」をチェック**
-   - Git for Windows: https://git-scm.com/download/win からインストール
+---
 
-2. **PowerShell を開く**（スタートメニュー → Windows PowerShell）
+### STEP 2. Git をインストール（コードを GitHub から持ってくるため）
 
-3. **このリポジトリを取ってくる**
-   ```powershell
-   cd $HOME\Documents
-   git clone <このリポジトリの URL>
-   cd oscillo-plasma-calc
-   ```
+#### 簡単派: GitHub Desktop を使う
 
-4. **仮想環境を作って依存をインストール**（1 回だけ）
-   ```powershell
-   python -m venv .venv
-   .\.venv\Scripts\python -m pip install --upgrade pip
-   .\.venv\Scripts\pip install numpy scipy pandas openpyxl sympy plotly matplotlib `
-                                 jinja2 shiny shinywidgets pytest pyyaml
-   ```
+1. https://desktop.github.com/ を開く
+2. 「Download for Windows」をクリック → インストール
+3. 起動して GitHub アカウントでサインイン
 
-5. **Shiny UI を起動**
-   ```powershell
-   .\.venv\Scripts\shiny run --port 8000 src\oscillo_plasma_calc\ui\app.py
-   # → http://127.0.0.1:8000 にブラウザでアクセス
-   ```
+#### コマンド派: Git for Windows を使う
 
-   ※ 毎回打つのが面倒なら、プロジェクト直下に `launch_ui.bat` を作ると便利:
-   ```bat
-   @echo off
-   cd /d %~dp0
-   .\.venv\Scripts\shiny run --port 8000 src\oscillo_plasma_calc\ui\app.py
-   pause
-   ```
-   これを **ダブルクリック** で起動できます。
+1. https://git-scm.com/download/win を開く
+2. ダウンロード後、インストーラを **すべて Next** で完了（デフォルト設定で OK）
+3. 確認: `cmd` で `git --version`
 
-### 🐧 Linux (Ubuntu / Debian)
+---
+
+### STEP 3. リポジトリを取ってくる
+
+#### GitHub Desktop の場合
+
+1. GitHub Desktop の上メニュー: File → Clone Repository
+2. URL タブを選択
+3. 入力欄に貼り付け: `https://github.com/masuhama2147-svg/oscillo-plasma-calc`
+4. Local path: `C:\Users\<あなた>\Documents\` のような **半角英数のみ** のパスを選ぶ（重要: 日本語フォルダ名は避ける）
+5. Clone をクリック
+
+#### コマンドプロンプトの場合
+
+```cmd
+cd %USERPROFILE%\Documents
+git clone https://github.com/masuhama2147-svg/oscillo-plasma-calc.git
+cd oscillo-plasma-calc
+```
+
+---
+
+### STEP 4. 仮想環境を作って依存パッケージをインストール
+
+コマンドプロンプトでプロジェクトフォルダに移動した状態で、**1 回だけ** 以下を順に実行:
+
+```cmd
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+> 仮想環境 (.venv) が有効化されると、プロンプトの先頭に `(.venv)` が付きます。
+
+3 行目の `pip install` は 2-5 分かかります。完了するまで待ってください。
+
+> エラーが出たら → [トラブルシューティング Q5/Q6](docs/troubleshooting.md#q5-python--m-venv-venv-でエラー)
+
+---
+
+### STEP 5. 起動
+
+#### 簡単派: ダブルクリック起動
+
+`scripts\launch_ui.bat` を **エクスプローラからダブルクリック**。
+
+⚠ Windows Defender SmartScreen の警告が出たら:
+1. 「詳細情報」をクリック（小さく表示されている）
+2. 「実行」をクリック
+3. 一度許可すれば次回以降は出ません
+
+#### コマンド派
+
+```cmd
+.venv\Scripts\shiny run --port 8000 src\oscillo_plasma_calc\ui\app.py
+```
+
+ブラウザで **http://127.0.0.1:8000** を開く（自動で開かなければ手動で URL を入力）。
+
+> ブラウザが反応しない → [トラブルシューティング Q10/Q11](docs/troubleshooting.md#q10-ブラウザが自動で開かない)
+
+---
+
+## 🍎 macOS（M1/M2/M3/M4）セットアップ
+
 ```bash
-sudo apt install python3 python3-venv python3-pip git
-git clone <このリポジトリの URL>
+# Homebrew が無ければ:
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Python と Git
+brew install python@3.13 git
+
+# リポジトリ取得
+cd ~/Documents
+git clone https://github.com/masuhama2147-svg/oscillo-plasma-calc.git
+cd oscillo-plasma-calc
+
+# 仮想環境
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 起動
+./scripts/launch_ui.sh
+# → http://127.0.0.1:8000 をブラウザで
+```
+
+---
+
+## 🐧 Linux (Ubuntu/Debian)
+
+```bash
+sudo apt install -y python3 python3-venv python3-pip git
+git clone https://github.com/masuhama2147-svg/oscillo-plasma-calc.git
 cd oscillo-plasma-calc
 python3 -m venv .venv
-.venv/bin/pip install -U pip
-.venv/bin/pip install numpy scipy pandas openpyxl sympy plotly matplotlib \
-                      jinja2 shiny shinywidgets pytest pyyaml
+source .venv/bin/activate
+pip install -r requirements.txt
 ./scripts/launch_ui.sh
 ```
 
 ---
 
-## 🎓 使い方（初心者向け）
+## 🎓 起動後の使い方
 
-Shiny UI を開くと左に 8 つのタブがあります。
+ブラウザで http://127.0.0.1:8000 を開くと、上部に **9 つのタブ** が並んでいます。
 
-### 1. **Upload** タブ — まずここから
-- 入力タイプを選ぶ:
-  - 「CSV アップロード（推奨）」: 自分のオシロ CSV をドラッグ&ドロップ
-  - 「別の xlsx パス」: xlsx ファイルのパスを指定
-- CSV の受け入れ形式は **STEP 1** パネルに常時表示されるので、違反するとすぐ赤エラーで止まります
-- オプション:
-  - DC オフセット補正（推奨 ON）
-  - コンセント側消費電力入力（会議要件）
-- **「読み込む & 計算」**ボタンを押す → 電気系物理量が全部自動計算されます
+### おすすめの使う順番
 
-### 2. **Waveform** — V(t) / I(t) の波形を見る
-### 3. **Electrical** — 電力・エネルギー系のサマリ + P(t) プロット + Lissajous
-### 4. **FFT** — 周波数スペクトル
-### 5. **Plasma** — 発光分光 2 本線法で Te / ne を推定
-### 6. **Chemistry** — GC データから G 値・化学効率・SEI などを計算
-### 7. **励起温度 Te** — n 本線 Boltzmann plot（H/O/W/Al/Cu 対応、R² 表示）
-### 8. **Trace** — 全物理量のダッシュボード（下記で詳細）
-### 9. **Export** — Markdown レポートとして保存
+1. **Upload** — まずここでデータを読み込む
+   - 「既存 xlsx (同梱デモ)」を選んで「読み込む & 計算」を試す
+   - 自分のデータは「CSV アップロード（推奨）」でドラッグ&ドロップ
+2. **Waveform** — V(t) と I(t) の波形を目視確認
+3. **Electrical** — Vpp/Ipp/E/P̄/Lissajous の表とプロット
+4. **FFT** — 周波数スペクトルで駆動源を確認
+5. **Plasma / 励起温度 Te** — 発光分光から Te / ne を推定（**R²<0.85 は参考値扱い**）
+6. **Chemistry** — GC データから G値・SEI・η・ASF α
+7. **Trace** — **🆕 G1-G6 ゲート + 全物理量ダッシュボード**
+   - 上部に研究判断ゲート（G1 Data → G6 Research Valid）が表示
+   - フィルタで「⚠警告のみ」表示も可
+8. **Export** — Markdown レポート / 解析済み量 CSV ダウンロード
 
-### 各物理量のカードの読み方（Trace タブ）
-```
-┌──────────────────────────────────────────────┐
-│ ピーク間電圧 Vpp   ℹ 注意                11.84 kV │ ← クリックで展開
-├──────────────────────────────────────────────┤
-│ 🔰 初学者向け（クリックで開く）            │
-│ 🔬 研究者向け（クリックで開く）            │
-│ 🎓 博士向け（クリックで開く）              │
-│ 📐 理論式・数値代入                        │
-│ ⚠ エラーライン判定                         │
-└──────────────────────────────────────────────┘
-```
-
-Trace タブ上部のフィルタで「⚠警告・異常のみ」を 1 クリック → 問題のあるカードだけ見えます。
+### 各カードの読み方
+カードをクリックで展開:
+- 🔰 初学者向け（新配属 B4 が読んで分かる）
+- 🔬 研究者向け（M1〜PD 向け）
+- 🎓 博士向け（前提・誤差・引用論文）
+- 📐 理論式と数値代入
+- ⚠ エラーライン（典型範囲逸脱時の原因と参照論文）
 
 ---
 
-## 🧪 テスト
+## 🆘 困ったときは
+
+すべてのよくあるエラーと対処を [docs/troubleshooting.md](docs/troubleshooting.md) にまとめてあります。
+
+それでも解決しないときは GitHub Issues に投稿:
+https://github.com/masuhama2147-svg/oscillo-plasma-calc/issues
+
+---
+
+## 📁 データの取扱い（重要 — 研究室 IP）
+
+このリポジトリには **実測データ・論文アーカイブ Excel は含まれていません**。`.gitignore` で確実に除外されています:
+
+- `オシロスコープ測定結果.xlsx`
+- `野村研究室_論文アーカイブ.xlsx`
+- `励起温度計算シート ver.2.xlsx`
+- `data_csv/*.csv`
+- `reports/*.md`
+
+これらは研究室内の NAS / Google Drive 共有経由で別途受け取ってください。**絶対に GitHub に push しないでください**（研究室の知的財産）。
+
+---
+
+## 🧪 テスト実行
 
 ```bash
-.venv/bin/pytest -q     # 45 passed
+.venv/bin/pytest -q     # 70+ tests, 全 passed
 ```
 
-内訳:
-- `test_electrical.py`: 瞬時電力・エネルギー積分・RMS の解析値一致
-- `test_plasma.py`: Boltzmann 逆算 / Debye オーダー / Stark 単調性
-- `test_io.py`: xlsx / CSV 往復
-- `test_spectroscopy.py`: 励起温度シート (H/O/W/Al/Cu) と数値一致
-- `test_advanced_electrical.py`: パルス検出, Duty, Crest/Form, power density
-- `test_oil_synthesis.py`: SEI, EC, χ, η_SE, ASF 回帰
-- `test_nonequilibrium.py`: E/N, T_vib, 非平衡度
-- `test_operational.py`: 1 kW 予算ルール判定
+CI: GitHub Actions で macOS / Windows / Linux × Python 3.12/3.13 を毎 push でチェック。
 
 ---
 
@@ -190,37 +241,46 @@ Trace タブ上部のフィルタで「⚠警告・異常のみ」を 1 クリ�
 ```
 src/oscillo_plasma_calc/
 ├── io_layer/         xlsx / CSV 読み書き (Waveform dataclass)
-├── signal/           フィルタ・ピーク検出・FFT・前処理 (DC/同期)
-├── electrical/       瞬時電力・エネルギー・RMS・Lissajous
+├── signal/           フィルタ・ピーク検出・FFT・前処理 (DC / 同期 / first_pulse モード)
+├── electrical/       瞬時電力・エネルギー・RMS・Lissajous (PRF/window 二択)
 │   └── advanced.py   パルスエネルギー・Duty・Crest/Form・power density
-├── plasma/           Boltzmann・Stark・Debye・Paschen・Ohmic
-│   └── nonequilibrium.py    E/N・mean electron energy・T_vib
-├── chemistry/        G 値・化学効率・選択性
-│   └── oil_synthesis.py     SEI・EC・χ_CO2・η_SE・ASF
-├── spectroscopy/     n 本線 Boltzmann plot (H/O/W/Al/Cu) + R²
-├── qa/               CSV バリデータ・エラーライン判定・1 kW 予算
+├── plasma/           Boltzmann 2 本線・Stark・Debye・Paschen・Ohmic
+│   └── nonequilibrium.py  E/N・mean electron energy・T_vib
+├── chemistry/        G値・化学効率・選択性
+│   └── oil_synthesis.py   SEI・EC・χ_CO2・η_SE・ASF α
+├── spectroscopy/     n 本線 Boltzmann plot (H/O/W/Al/Cu) + R² + is_te_reliable
+├── qa/               CSV バリデータ・エラーライン判定・1 kW 予算・🆕 G1-G6 ゲート
 ├── docs/             物理量の 3 レベル解説 + 典型範囲 DB
 ├── symbolic/         全理論式を sympy で一元定義
 ├── report/           Markdown レポート + LaTeX 整形ヘルパ
-└── ui/               Shiny for Python UI
+└── ui/
+    ├── components/   safe_filename, gate_panel, KPI rendering
+    └── app.py        Shiny for Python (9 タブ + KaTeX + ゲート連動)
 
-tests/                pytest（45 passed）
-scripts/              CLI スクリプト 3 本
-docs/                 設計ドキュメント群（下記参照）
+tests/                pytest（70+ tests passed）
+scripts/              CLI スクリプト 3 本 + 起動 .sh / .bat
+docs/                 設計ドキュメント 10+ 本
+.github/workflows/    GitHub Actions CI (Mac/Win/Linux)
 ```
 
 ---
 
 ## 📚 設計ドキュメント
 
-プロジェクトの意思決定と理論背景は `docs/` 配下に全てある:
+プロジェクトの意思決定と理論背景は `docs/` 配下:
 
-- [`theory_reference.md`](docs/theory_reference.md) — 理論式リファレンス（20+ 式、全て導出・前提・引用論文付き）
-- [`ui_redesign_explanation.md`](docs/ui_redesign_explanation.md) — 研究者向け UI 設計の根拠
-- [`math_rendering_fix.md`](docs/math_rendering_fix.md) — KaTeX 数式レンダリングの仕組み
-- [`publish_and_render_plan.md`](docs/publish_and_render_plan.md) — 限定公開インフラ設計
-- [`ux_redesign_researcher_plan.md`](docs/ux_redesign_researcher_plan.md) — UX 再設計（研究室会議と整合）
-- [`advanced_theory_and_trace_ux_plan.md`](docs/advanced_theory_and_trace_ux_plan.md) — 高次理論式追加の技術設計
+- [`theory_reference.md`](docs/theory_reference.md) — 理論式リファレンス（20+ 式）
+- [`IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) — 実装内容 完全リファレンス
+- [`formula_selection_rationale.md`](docs/formula_selection_rationale.md) — なぜその理論式を選んだか
+- [`2026-05-02_status_report.md`](docs/2026-05-02_status_report.md) — 状況レポート（多視点）
+- [`2026-05-02_numerical_critique.md`](docs/2026-05-02_numerical_critique.md) — 数値検証レポート（NASA grade 認定）
+- [`2026-05-02_full_status_and_errors.md`](docs/2026-05-02_full_status_and_errors.md) — 統合状況 + エラー一覧
+- [`troubleshooting.md`](docs/troubleshooting.md) — FAQ
+- [`ui_redesign_explanation.md`](docs/ui_redesign_explanation.md) / [`ux_redesign_researcher_plan.md`](docs/ux_redesign_researcher_plan.md) — UI/UX 設計
+- [`math_rendering_fix.md`](docs/math_rendering_fix.md) — KaTeX 数式レンダリング
+- [`publish_and_render_plan.md`](docs/publish_and_render_plan.md) — 限定公開インフラ
+- [`advanced_theory_and_trace_ux_plan.md`](docs/advanced_theory_and_trace_ux_plan.md) — 高次理論式追加と Trace UX
+- [`researcher_ui_ux_visualization_plan.md`](docs/researcher_ui_ux_visualization_plan.md) — 研究者向け可視化強化
 
 ---
 
@@ -235,7 +295,7 @@ docs/                 設計ドキュメント群（下記参照）
 | 可視化 | plotly, matplotlib |
 | GUI | Shiny for Python (shiny 1.6+) |
 | 数式表示 | KaTeX 0.16 + MutationObserver |
-| 品質 | pytest, ruff |
+| 品質 | pytest, GitHub Actions CI |
 
 ---
 
@@ -250,5 +310,10 @@ docs/                 設計ドキュメント群（下記参照）
 - Nomura, K. et al. (2013) "Electrical breakdown under nanosecond pulse" CAP 13:1050
 - Mochtar, A. A. et al. (2017) "Hydrogen production by in-liquid plasma" JEPE 10:335
 
-その他の根拠論文は `docs/theory_reference.md` と各モジュールの docstring にまとめてあります。
+その他の根拠論文は [`docs/theory_reference.md`](docs/theory_reference.md) と各モジュールの docstring にまとめてあります。
 
+---
+
+## 📜 ライセンス
+
+研究室内限定。外部公開時は野村先生・中島先生に確認必須。

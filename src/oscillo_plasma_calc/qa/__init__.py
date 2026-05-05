@@ -4,10 +4,12 @@ from .operational import (
     device_power_budget, heat_dissipation_requirement, device_efficiency,
     DEFAULT_BUDGET_W,
 )
+from .gates import GateStatus, evaluate_gates
 
 __all__ = [
     "validate_csv", "ValidationReport", "ValidationItem",
     "classify", "AnomalyResult",
     "device_power_budget", "heat_dissipation_requirement", "device_efficiency",
     "DEFAULT_BUDGET_W",
+    "GateStatus", "evaluate_gates",
 ]

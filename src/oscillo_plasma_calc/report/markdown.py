@@ -20,8 +20,10 @@ HEADER = """# 液中プラズマ オシロスコープ波形 解析レポート
 def build_markdown(label: str, meta: dict,
                    traces: list[TraceResult]) -> str:
     meta_lines = "\n".join(f"- **{k}**: {v}" for k, v in meta.items()) or "- (なし)"
+    # Phase 0.6: Windows-safe timestamp (ISO `:` is forbidden in NTFS filenames,
+    # and even in document text the `:` confuses some tools; use `T HH-MM-SS`).
     body = HEADER.format(
-        now=datetime.now().isoformat(timespec="seconds"),
+        now=datetime.now().strftime("%Y-%m-%dT%H-%M-%S"),
         label=label,
         metadata_block="## 測定メタデータ\n" + meta_lines,
     )

@@ -11,6 +11,9 @@
 *.xlsm
 *.xlsb
 
+# 外部からの参考 PDF（NASA / 論文 PDF など、配布権の無い資料）
+*.pdf
+
 # Excel から派生した CSV / レポート（測定条件を含むため非公開）
 data_csv/*.csv
 !data_csv/.gitkeep

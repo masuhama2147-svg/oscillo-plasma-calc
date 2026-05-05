@@ -143,6 +143,23 @@ class AnalysisBundle:
 def analyze_electrical(wf: Waveform,
                        pulse_rep_freq_hz: float | None = None,
                        device_budget_W: float = DEFAULT_BUDGET_W) -> AnalysisBundle:
+    # Phase 0.5: NaN/Inf early-return guard.
+    # Downstream Cantera / NASA solvers diverge silently on non-finite inputs,
+    # so we fail fast at the pipeline entrance with a clear error.
+    import numpy as _np
+    if not _np.all(_np.isfinite(wf.v)):
+        raise ValueError(
+            "voltage_V contains NaN/Inf — clean the CSV before analysis "
+            "(use the Upload-tab validator to identify offending rows)."
+        )
+    if not _np.all(_np.isfinite(wf.i)):
+        raise ValueError(
+            "current_A contains NaN/Inf — clean the CSV before analysis."
+        )
+    if not _np.all(_np.isfinite(wf.t)):
+        raise ValueError(
+            "time_s contains NaN/Inf — verify oscilloscope export integrity."
+        )
     bundle = AnalysisBundle(
         waveform=wf,
         vpp=detect_vpp(wf.v),

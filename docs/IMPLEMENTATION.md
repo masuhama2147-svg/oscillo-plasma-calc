@@ -21,6 +21,7 @@
 11. [テスト](#11-テスト)
 12. [文書化レイヤ](#12-文書化レイヤ)
 13. [全実装ファイル一覧](#13-全実装ファイル一覧)
+14. [研究者向け UI/UX・論文補助図強化](#14-研究者向け-uiux論文補助図強化)
 
 ---
 
@@ -859,3 +860,45 @@ docs/
 9. 本書（IMPLEMENTATION.md）にエントリを追加
 
 これで Trace タブに自動的に表示され、KaTeX で式が描画され、エラーライン判定が動く。
+
+---
+
+## 14. 研究者向け UI/UX・論文補助図強化
+
+詳細設計は [`researcher_ui_ux_visualization_plan.md`](researcher_ui_ux_visualization_plan.md) に分離した。
+
+今回の UI 強化は、既存の Shiny for Python + Plotly + `TraceResult` を維持し、油合成研究者が次の判断を短時間で行えることを目的にした。
+
+| 判断 | UI での支援 |
+|---|---|
+| 放電が成立しているか | Waveform の V/I ピーク、10–90% rise time、ゼロクロス注釈 |
+| 装置安全 | Upload と Trace の 1 kW 予算余裕度、Electrical の Ppeak·D |
+| エネルギー投入の妥当性 | Electrical の P(t)、累積 E(t)、Lissajous、電力 KPI 表 |
+| 油化へ進むか | Chemistry の G value、SEI、EC、CO2 conversion、ASF alpha |
+| 反応場が非平衡か | Plasma の Te、ne、E/N、平均電子エネルギー、T_e/T_gas |
+| LTE 仮定が妥当か | Boltzmann plot の R²、採用線数、除外線、LTE 判定 |
+| 論文・研究ノートへ転記できるか | Trace 上部の候補値表、主要式ショートカット、Export CSV |
+
+### 14.1 UI helper
+
+`src/oscillo_plasma_calc/ui/components.py` を追加し、UI から独立してテストできる helper を置いた。
+
+- `display_value()` — 表・CSV 用の値整形
+- `status_label()` — anomaly level の安定化
+- `trace_rows()` / `export_trace_csv()` — 計算済み量 CSV
+- `important_traces()` / `paper_candidate_traces()` — Trace 上部の研究者向け集約
+- `apply_research_plot_layout()` — screen / paper 図表テーマ
+- `waveform_annotations()` — V/I ピーク、rise time、ゼロクロス注釈点
+- `anomaly_markdown()` / `figure_guidance_markdown()` — Markdown Export 追加ブロック
+
+### 14.2 Export 仕様
+
+Export CSV は元波形ではなく、論文補助表に使う計算済み量を出す。
+
+```csv
+quantity,value,unit,status,source,equation_key
+Peak-to-peak voltage Vpp,6800,V,ok,2013_CAP-13-1050,vpp
+...
+```
+
+Markdown は先頭に実験条件レビュー、主要 KPI 表、異常値・注意値、図表の読み方を追加し、その後に従来の TraceResult 詳細を続ける。

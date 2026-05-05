@@ -62,6 +62,41 @@ class BoltzmannPlotResult:
             return "LTE 直線性 やや弱い"
         return "LTE 非成立の疑い"
 
+    @property
+    def is_te_reliable(self) -> bool:
+        """Whether Te can be used by downstream calculations (Phase 0.2 gate).
+
+        Returns True only when:
+        - n_used >= 3 (Boltzmann plot needs ≥ 3 lines for slope estimate)
+        - R² >= 0.85 (LTE linearity acceptable)
+        - Te is finite and positive (no slope=0 / negative-Te artefacts)
+        """
+        import math as _m
+        if self.n_used < 3:
+            return False
+        if not (_m.isfinite(self.r_squared) and self.r_squared >= 0.85):
+            return False
+        if not (_m.isfinite(self.Te_K) and self.Te_K > 0):
+            return False
+        return True
+
+    @property
+    def reliability_warning(self) -> str:
+        """Empty if reliable; otherwise a one-liner that downstream UI can show."""
+        import math as _m
+        if self.n_used < 3:
+            return f"採用線数 n={self.n_used} は 3 本未満。少なくとも 3 本必要。"
+        if not _m.isfinite(self.r_squared):
+            return "R² が計算できませんでした（線データ不正）。"
+        if self.r_squared < 0.85:
+            return (f"R² = {self.r_squared:.3f} < 0.85 → "
+                    f"LTE 直線性が弱く、Te を下流計算に使ってはいけません。")
+        if not _m.isfinite(self.Te_K):
+            return "Te が nan/inf。傾き m が 0 か発散している可能性。"
+        if self.Te_K <= 0:
+            return f"Te = {self.Te_K:.4g} K が非物理（負値）。線対選択を見直してください。"
+        return ""
+
 
 def _line_xy(line: SpectralLine, intensity: float) -> tuple[float, float]:
     nu = C_LIGHT / (line.wavelength_nm * 1e-9)
