@@ -1168,13 +1168,19 @@ def server(input, output, session):
         mode = input.plot_mode()
         freq_v, amp_v = power_spectrum(wf.v, wf.dt)
         freq_i, amp_i = power_spectrum(wf.i, wf.dt)
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=freq_v/1e6, y=amp_v, name="V spectrum"))
-        fig.add_trace(go.Scatter(x=freq_i/1e6, y=amp_i, name="I spectrum",
-                                 yaxis="y2"))
+        # Phase 0 fix: drop DC bin (freq[0]=0) — log scale + 0 makes Plotly
+        # auto-range explode to 10^243. Also clip to Nyquist for display.
         nyq_mhz = wf.fs / 2 / 1e6
-        dom_idx = int(np.nanargmax(amp_v[1:]) + 1) if len(amp_v) > 1 else 0
-        dom_mhz = float(freq_v[dom_idx] / 1e6) if dom_idx else 0.0
+        v_mhz = freq_v[1:] / 1e6
+        i_mhz = freq_i[1:] / 1e6
+        v_amp = amp_v[1:]
+        i_amp = amp_i[1:]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=v_mhz, y=v_amp, name="V spectrum"))
+        fig.add_trace(go.Scatter(x=i_mhz, y=i_amp, name="I spectrum",
+                                 yaxis="y2"))
+        dom_idx = int(np.nanargmax(v_amp)) if len(v_amp) > 0 else 0
+        dom_mhz = float(v_mhz[dom_idx]) if len(v_mhz) > 0 else 0.0
         for mult, color in ((1, "#111827"), (2, "#6b7280"), (3, "#9ca3af")):
             x = dom_mhz * mult
             if x > 0 and x <= nyq_mhz:
@@ -1183,11 +1189,12 @@ def server(input, output, session):
                               annotation_text=f"{mult}f = {x:.3g} MHz")
         fig.add_vline(x=nyq_mhz, line_dash="solid", line_color="#c33333",
                       annotation_text=f"Nyquist {nyq_mhz:.3g} MHz")
-        fig.add_vrect(x0=nyq_mhz, x1=max(nyq_mhz * 1.05, float(freq_v[-1] / 1e6)),
-                      fillcolor="#c33333", opacity=0.08, line_width=0)
+        # Lock x range to [first non-DC bin, Nyquist]
+        x_min = max(float(v_mhz[0]) if len(v_mhz) else 1e-3, 1e-3)
         fig.update_layout(
-            title="Power spectrum (rFFT)",
-            xaxis=dict(title="frequency [MHz]", type="log"),
+            title="Power spectrum (rFFT, DC bin excluded)",
+            xaxis=dict(title="frequency [MHz]", type="log",
+                       range=[np.log10(x_min), np.log10(nyq_mhz)]),
             yaxis=dict(title="|V| [V]"),
             yaxis2=dict(title="|I| [A]", overlaying="y", side="right"),
             height=500,
